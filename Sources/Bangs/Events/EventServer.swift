@@ -21,7 +21,10 @@ final class EventServer {
         params.acceptLocalOnly = true
         params.allowLocalEndpointReuse = true
         guard let nwPort = NWEndpoint.Port(rawValue: port) else { return }
-        let listener = try NWListener(using: params, on: nwPort)
+        // Сокет привязан именно к 127.0.0.1, а не ко всем интерфейсам (*:port):
+        // из сети к нему нельзя даже подключиться.
+        params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: nwPort)
+        let listener = try NWListener(using: params)
         listener.newConnectionHandler = { [weak self] connection in self?.handle(connection) }
         listener.stateUpdateHandler = { state in
             if case .failed(let error) = state {

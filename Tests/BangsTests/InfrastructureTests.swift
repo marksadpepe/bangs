@@ -197,3 +197,20 @@ struct StateStoreTests {
         }
     }
 }
+
+@Suite("Привязка сервера", .serialized)
+struct EventServerBindingTests {
+    /// Регрессия: сервер слушал *:port (все интерфейсы). Должен слушать только 127.0.0.1.
+    @Test func listensOnLoopbackOnly() async throws {
+        let server = EventServer { _ in }
+        let port = randomPort()
+        try server.start(port: port)
+        defer { server.stop() }
+        try await Task.sleep(for: .milliseconds(200))
+
+        let result = try runProcess("/usr/sbin/lsof", ["-nP", "-a", "-p", String(getpid()), "-iTCP:\(port)", "-sTCP:LISTEN"],
+                                    environment: ["PATH": testPath])
+        #expect(result.output.contains("127.0.0.1:\(port)"), "\(result.output)")
+        #expect(!result.output.contains("*:\(port)"), "\(result.output)")
+    }
+}
