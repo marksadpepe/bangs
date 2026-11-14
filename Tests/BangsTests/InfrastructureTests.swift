@@ -172,3 +172,28 @@ struct NotchGeometryTests {
         #expect(g.headerHeight == 32)
     }
 }
+
+@Suite("Сохранение состояния")
+struct StateStoreTests {
+    @Test func oldWaitSeenStatusLoadsAsWaiting() throws {
+        try withTempDir { dir in
+            let url = dir.appendingPathComponent("state.json")
+            let chats = [makeChat("a", .waitSeen), makeChat("b", .done)]
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .secondsSince1970
+            try encoder.encode(chats).write(to: url)
+
+            let loaded = StateStore(url: url).load()
+            #expect(loaded.map(\.status) == [.waiting, .done])
+        }
+    }
+
+    @Test func missingOrBrokenFileLoadsEmpty() throws {
+        try withTempDir { dir in
+            let url = dir.appendingPathComponent("state.json")
+            #expect(StateStore(url: url).load().isEmpty)
+            try Data("garbage".utf8).write(to: url)
+            #expect(StateStore(url: url).load().isEmpty)
+        }
+    }
+}

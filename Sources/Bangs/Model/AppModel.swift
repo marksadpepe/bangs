@@ -64,11 +64,13 @@ final class AppModel {
     var visibleChats: [Chat] { chats.filter(\.isVisible) }
 
     var doneCount: Int { visibleChats.filter { $0.status == .done }.count }
+    /// Чаты, которые ждут ответа. Просмотр в панели их не гасит — только реальный ответ (событие от Claude Code).
+    var waitingCount: Int { visibleChats.filter { $0.status.isWaiting }.count }
 
     var indicator: NotchIndicator {
         let done = doneCount
         if done > 0 { return .done(done) }
-        let waiting = visibleChats.filter { $0.status == .waiting }.count
+        let waiting = waitingCount
         if waiting > 0 { return .waiting(waiting) }
         return .quiet
     }
@@ -148,7 +150,6 @@ final class AppModel {
     }
 
     func didClose() {
-        if case .detail(let id) = screen { markLeftDetail(id) }
         frozenOrder = nil
     }
 
@@ -164,13 +165,11 @@ final class AppModel {
 
     /// «Назад» с экрана чата: ожидающий чат становится «видел», а не «просмотрен».
     func leaveDetail() {
-        guard case .detail(let id) = screen else { return }
-        markLeftDetail(id)
+        guard case .detail = screen else { return }
         screen = .list
     }
 
     func openInTerminal(_ id: String) {
-        markLeftDetail(id)
         if let chat = chat(id) { onOpenTerminal?(chat) }
     }
 
@@ -190,7 +189,5 @@ final class AppModel {
         chats[i].setStatus(status)
     }
 
-    private func markLeftDetail(_ id: String) {
-        if chat(id)?.status == .waiting { setStatus(id, .waitSeen) }
-    }
+
 }

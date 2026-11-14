@@ -60,10 +60,11 @@ private struct PanelHeader: View {
                 .frame(maxWidth: side, alignment: .leading)
             Spacer(minLength: 0)
             HStack(spacing: 8) {
-                let done = model.doneCount
-                Text(done > 0 ? "\(done)\(model.strings.completed)" : model.strings.allSeen)
+                let done = model.doneCount, waiting = model.waitingCount
+                Text(done > 0 ? "\(done)\(model.strings.completed)"
+                     : waiting > 0 ? "\(waiting)\(model.strings.nWait)" : model.strings.allSeen)
                     .font(.ui(12, .semibold))
-                    .foregroundStyle(done > 0 ? model.doneColor : Palette.headerMuted)
+                    .foregroundStyle(done > 0 ? model.doneColor : waiting > 0 ? model.waitColor : Palette.headerMuted)
                     .lineLimit(1)
                 Button { model.onRequestClose?() } label: {
                     Icon(.chevronUp, size: 11)

@@ -64,8 +64,7 @@ more click takes you to the right Terminal tab.
 |---|---|---|
 | Working | grey, pulsing | You sent a prompt and Claude is working |
 | Done | "done" color + badge | Claude finished its turn. The notch glows until you look |
-| Needs you | "waiting" color + badge | A permission prompt or a question (`AskUserQuestion`) is pending |
-| Seen · still waiting | outlined | You opened a waiting chat and went back without answering. The notch does not light up |
+| Needs you | "waiting" color + badge | A permission prompt or a question (`AskUserQuestion`) is pending. It stays lit, even after you look at it, until you actually answer |
 | Seen | hollow grey | Nothing to do |
 
 Clicking a **done** chat marks it as seen and, by default, switches to its Terminal tab. Clicking a **waiting** chat

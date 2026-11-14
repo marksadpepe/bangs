@@ -6,14 +6,24 @@ final class StateStore {
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Bangs", isDirectory: true)
 
-    private let url = StateStore.directory.appendingPathComponent("state.json")
+    private let url: URL
     private var pending: DispatchWorkItem?
+
+    init(url: URL = StateStore.directory.appendingPathComponent("state.json")) {
+        self.url = url
+    }
 
     func load() -> [Chat] {
         guard let data = try? Data(contentsOf: url) else { return [] }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970
-        return (try? decoder.decode([Chat].self, from: data)) ?? []
+        let chats = (try? decoder.decode([Chat].self, from: data)) ?? []
+        // «Видел · ждёт ответа» больше не используется: чат ждёт, пока на него не ответят.
+        return chats.map { chat in
+            var chat = chat
+            if chat.status == .waitSeen { chat.status = .waiting }
+            return chat
+        }
     }
 
     /// Пишет на диск не чаще раза в секунду.

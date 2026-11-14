@@ -4,14 +4,16 @@ import SwiftUI
 struct ChatListView: View {
     let model: AppModel
     var scrollable = true
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
         if scrollable {
-            ViewThatFits(in: .vertical) {
-                list
-                ScrollView(.vertical, showsIndicators: false) { list }
+            // Высота области = высоте списка, но не больше лимита; дальше — прокрутка.
+            ScrollView(.vertical, showsIndicators: false) {
+                list.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
-            .frame(maxHeight: model.maxListHeight)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: min(max(contentHeight, 1), model.maxListHeight))
         } else {
             list
         }

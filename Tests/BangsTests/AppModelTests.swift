@@ -8,7 +8,7 @@ struct AppModelTests {
 
     @Test func quietWhenNothingNeedsAttention() {
         let m = makeModel()
-        m.chats = [makeChat("a", .working), makeChat("b", .seen), makeChat("c", .waitSeen), makeChat("d", .denied)]
+        m.chats = [makeChat("a", .working), makeChat("b", .seen)]
         #expect(m.indicator == .quiet)
         #expect(!m.indicator.isActive)
     }
@@ -19,10 +19,11 @@ struct AppModelTests {
         #expect(m.indicator == .done(2))
     }
 
-    @Test func waitingCountsOnlyNewWaits() {
+    @Test func everyWaitingChatLightsTheNotch() {
         let m = makeModel()
-        m.chats = [makeChat("a", .waiting), makeChat("b", .waitSeen), makeChat("c", .waiting)]
-        #expect(m.indicator == .waiting(2))
+        m.chats = [makeChat("a", .waiting), makeChat("b", .waitSeen), makeChat("c", .denied), makeChat("d", .working)]
+        #expect(m.indicator == .waiting(3))
+        #expect(m.waitingCount == 3)
     }
 
     @Test func hiddenChatsDoNotLightTheNotch() {
@@ -133,16 +134,28 @@ struct AppModelTests {
         #expect(m.orderedChats.map(\.id) == orderAtOpen, "строки не прыгают")
     }
 
-    @Test func leavingDetailMarksWaitSeenAndKeepsWaitingTime() throws {
+    /// Регрессия: после просмотра чат гас («видел»), хотя ответа ещё не было.
+    @Test func viewingWaitingChatKeepsItWaitingUntilAnswered() throws {
         let since = Date().addingTimeInterval(-300)
         let m = makeModel()
         m.chats = [makeChat("a", .waiting, since: since)]
+        m.prepareOpen()
         m.tap(m.chats[0])
+        #expect(m.screen == .detail("a"))
         m.leaveDetail()
-        let c = try #require(m.chat("a"))
-        #expect(c.status == .waitSeen)
-        #expect(c.statusSince == since)
         #expect(m.screen == .list)
+        m.tap(m.chats[0])
+        m.didClose()
+
+        let c = try #require(m.chat("a"))
+        #expect(c.status == .waiting)
+        #expect(c.statusSince == since)
+        #expect(m.indicator == .waiting(1))
+
+        // Гаснет только после ответа — события от Claude Code.
+        m.apply(hookEvent("PostToolUse", session: "a", ["tool_name": "Bash"]))
+        #expect(m.chat("a")?.status == .working)
+        #expect(m.indicator == .quiet)
     }
 
     @Test func leavingDetailKeepsDenied() {
@@ -168,22 +181,13 @@ struct AppModelTests {
         #expect(m.indicator == .waiting(1))
     }
 
-    @Test func closingPanelFromDetailMarksWaitSeen() {
-        let m = makeModel()
-        m.chats = [makeChat("a", .waiting)]
-        m.prepareOpen()
-        m.tap(m.chats[0])
-        m.didClose()
-        #expect(m.chat("a")?.status == .waitSeen)
-    }
-
-    @Test func openInTerminalMarksWaitSeenAndCallsBack() {
+    @Test func openInTerminalKeepsWaitingAndCallsBack() {
         var opened: String?
         let m = makeModel()
         m.onOpenTerminal = { opened = $0.id }
         m.chats = [makeChat("a", .waiting)]
         m.openInTerminal("a")
-        #expect(m.chat("a")?.status == .waitSeen)
+        #expect(m.chat("a")?.status == .waiting)
         #expect(opened == "a")
     }
 
