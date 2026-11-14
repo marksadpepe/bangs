@@ -1,5 +1,7 @@
 # Bangs
 
+[![Tests](https://github.com/marksadpepe/bangs/actions/workflows/tests.yml/badge.svg)](https://github.com/marksadpepe/bangs/actions/workflows/tests.yml)
+
 **Your MacBook notch shows when Claude Code needs you.**
 
 Bangs is a small macOS utility for people who run several [Claude Code](https://code.claude.com) sessions in parallel
@@ -153,14 +155,16 @@ Sources/Bangs/
   UI/         SwiftUI views: closed notch, panel, chat list, waiting chat, settings, theme, strings
   Terminal/   jump to a Terminal.app tab / resume a session
   Debug/      PNG renderer for screens
+Tests/BangsTests/       Swift Testing suites
 hooks/notch-hook        the hook script (bash + curl, optional jq)
-scripts/                build-app, install-app, install-hooks
+scripts/                build-app, install-app, install-hooks, test
 notch-app-handoff/      original spec (Russian) and design sources
 ```
 
 Useful commands:
 
 ```bash
+scripts/test.sh                                      # run the tests
 swift build                                          # debug build
 scripts/build-app.sh                                 # build/Bangs.app (ad-hoc signed)
 open build/Bangs.app --args --mock --open            # demo data, panel open
@@ -170,6 +174,24 @@ BANGS_PORT=47999 .build/debug/Bangs                  # run on a separate port fo
 # Send a fake event:
 curl -X POST 127.0.0.1:47999/event -d '{"event":{"session_id":"t1","hook_event_name":"UserPromptSubmit","cwd":"/tmp","prompt":"Hello"}}'
 ```
+
+### Tests
+
+The tests use [Swift Testing](https://developer.apple.com/xcode/swift-testing/), which ships with the Command Line
+Tools. XCTest does not, without Xcode. `scripts/test.sh` adds the framework search paths that SwiftPM misses without
+Xcode. With Xcode installed, plain `swift test` works too.
+
+| Suite | What it checks |
+|---|---|
+| Hook event parsing | Envelope fields, bare hook JSON, invalid input |
+| State machine | Every hook event → status transition, idle notifications, `/clear`, same-tab restarts, dead-process cleanup |
+| Panel model | Notch indicator, ordering and grouping, frozen order while open, tap / back / mark-all actions, texts |
+| Transcript | First prompt and last assistant message extraction, titles and excerpts |
+| Infrastructure | Local HTTP server (incl. large bodies), inbox fallback, account reader, settings persistence, notch geometry |
+| Scripts | `notch-hook` end to end against a test server and the inbox fallback, and `install-hooks.sh` idempotency and clean uninstall. Both run in a temporary `HOME` |
+
+The tests never touch your real `~/.claude` or the running app. They use temporary directories, in-memory settings and
+random ports.
 
 To sign with your own certificate, pass `SIGN_IDENTITY="<name>"` to `scripts/build-app.sh`. With the default ad-hoc
 signature, macOS asks for Terminal automation permission again after every rebuild.
