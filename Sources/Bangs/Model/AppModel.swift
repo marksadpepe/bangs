@@ -35,7 +35,10 @@ final class AppModel {
 
     @ObservationIgnored var panelFrame: CGRect = .zero
     @ObservationIgnored var onRequestClose: (() -> Void)?
+    /// «Открыть в терминале»: переключить Terminal и закрыть панель.
     @ObservationIgnored var onOpenTerminal: ((Chat) -> Void)?
+    /// Клик по чату в списке: переключить Terminal, панель остаётся открытой.
+    @ObservationIgnored var onRevealTerminal: ((Chat) -> Void)?
     @ObservationIgnored var onChatsChanged: (() -> Void)?
     /// Каталог конфигурации, из которого прочитан текущий аккаунт.
     @ObservationIgnored var accountConfigDir: String?
@@ -155,7 +158,8 @@ final class AppModel {
             return
         }
         if chat.status == .done { setStatus(chat.id, .seen) }
-        if settings.jumpOnClick { onOpenTerminal?(chat) }
+        // Панель не закрываем: можно прощёлкать подряд несколько готовых чатов.
+        if settings.jumpOnClick { onRevealTerminal?(chat) }
     }
 
     /// «Назад» с экрана чата: ожидающий чат становится «видел», а не «просмотрен».

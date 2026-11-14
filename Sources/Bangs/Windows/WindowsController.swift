@@ -42,6 +42,8 @@ final class WindowsController: NSObject, NSWindowDelegate {
     private var monitors: [Any] = []
     private var clock: Timer?
     private var closeToken = 0
+    /// До этого момента потеря фокуса не закрывает панель (Terminal активируется по клику в списке).
+    private var keepOpenUntil = Date.distantPast
 
     private static let glowMargin: CGFloat = 40
     private static let shadowMargin: CGFloat = 60
@@ -71,6 +73,19 @@ final class WindowsController: NSObject, NSWindowDelegate {
                 MainActor.assumeIsolated { _ = TerminalJumper.open(chat) }
             }
         }
+        model.onRevealTerminal = { [weak self] chat in
+            guard let self else { return }
+            self.keepOpenUntil = Date().addingTimeInterval(1.5)
+            _ = TerminalJumper.open(chat)
+            // Terminal стал активным — возвращаем фокус панели, чтобы работали Esc и клики.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                MainActor.assumeIsolated {
+                    guard self.model.isOpen else { return }
+                    self.mainPanel.orderFrontRegardless()
+                    self.mainPanel.makeKey()
+                }
+            }
+        }
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(screensChanged),
@@ -92,6 +107,7 @@ final class WindowsController: NSObject, NSWindowDelegate {
 
     func openPanel() {
         guard !model.isOpen else { return }
+        keepOpenUntil = .distantPast
         closeToken += 1  // отменяет незавершённое закрытие
         model.prepareOpen()
         model.panelVisible = true
@@ -132,6 +148,8 @@ final class WindowsController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
+        // Фокус ушёл в Terminal из-за клика по чату — панель остаётся.
+        guard Date() >= keepOpenUntil else { return }
         closePanel()
     }
 

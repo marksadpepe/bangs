@@ -94,20 +94,43 @@ struct AppModelTests {
         }
     }
 
-    @Test func tapJumpsToTerminalOnlyWhenEnabled() {
-        var opened: [String] = []
+    @Test func tapRevealsTerminalOnlyWhenEnabled() {
+        var revealed: [String] = []
         let on = makeModel(jumpOnClick: true)
-        on.onOpenTerminal = { opened.append($0.id) }
+        on.onRevealTerminal = { revealed.append($0.id) }
         on.chats = [makeChat("done", .done), makeChat("work", .working), makeChat("wait", .waiting)]
         for c in on.chats { on.tap(c) }
-        #expect(opened == ["done", "work"])
+        #expect(revealed == ["done", "work"])
 
-        opened = []
+        revealed = []
         let off = makeModel(jumpOnClick: false)
-        off.onOpenTerminal = { opened.append($0.id) }
+        off.onRevealTerminal = { revealed.append($0.id) }
         off.chats = [makeChat("done", .done)]
         off.tap(off.chats[0])
-        #expect(opened.isEmpty)
+        #expect(revealed.isEmpty)
+    }
+
+    /// Регрессия: клик по одному из нескольких готовых чатов закрывал панель.
+    @Test func tappingDoneChatsKeepsPanelOpen() {
+        var closeRequests = 0, closingJumps = 0
+        let m = makeModel(jumpOnClick: true)
+        m.onRequestClose = { closeRequests += 1 }
+        m.onOpenTerminal = { _ in closingJumps += 1 }
+        m.onRevealTerminal = { _ in }
+        m.chats = [makeChat("a", .done), makeChat("b", .done), makeChat("c", .done)]
+        m.prepareOpen()
+        let orderAtOpen = m.orderedChats.map(\.id)
+
+        m.tap(m.chats[0])
+        #expect(m.indicator == .done(2))
+        m.tap(m.chats[1])
+        m.tap(m.chats[2])
+
+        #expect(closeRequests == 0)
+        #expect(closingJumps == 0)
+        #expect(m.chats.allSatisfy { $0.status == .seen })
+        #expect(m.screen == .list)
+        #expect(m.orderedChats.map(\.id) == orderAtOpen, "строки не прыгают")
     }
 
     @Test func leavingDetailMarksWaitSeenAndKeepsWaitingTime() throws {
