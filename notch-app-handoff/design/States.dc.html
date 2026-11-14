@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Состояния чёлки</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#FFB07A}a:hover{color:#FFD2B0}
+.ear-l{position:absolute;top:0;width:12px;height:12px;background:radial-gradient(circle at 0 100%,transparent 11.5px,#000 12px)}
+.ear-r{position:absolute;top:0;width:12px;height:12px;background:radial-gradient(circle at 100% 100%,transparent 11.5px,#000 12px)}
+.glow{animation:glow 2.4s ease-in-out infinite}
+@keyframes glow{0%,100%{box-shadow:0 0 0 1.5px rgba(var(--g),.9),0 6px 22px 2px rgba(var(--g),.45)}50%{box-shadow:0 0 0 1.5px rgba(var(--g),.6),0 4px 12px 0 rgba(var(--g),.25)}}
+.blink{animation:blink 1.2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.sw:focus-visible{outline:2px solid #8E8E93;outline-offset:3px}
+</style>
+</helmet>
+<div style="width: 1280px; height: 520px; box-sizing: border-box; padding: 48px 56px; background: #0f0f11; font-family: Inter, -apple-system, system-ui, sans-serif; color: #f2f2f4; display: flex; flex-direction: column; gap: 32px">
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <h1 style="margin: 0; font-size: 24px; font-weight: 600">Состояния закрытой чёлки</h1>
+    <p style="margin: 0; font-size: 14px; color: #a8a8ae">Подсветка гаснет, когда все завершённые чаты просмотрены. Цвет берётся из настроек панели.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px">
+
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <div style="position: relative; height: 200px; background: #1c1c1f; border: 1px solid #26262a; border-radius: 14px; overflow: hidden">
+        <div style="height: 34px; background: #141416"></div>
+        <div style="position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 220px; height: 34px">
+          <div class="ear-l" style="left: 0"></div><div class="ear-r" style="right: 0"></div>
+          <div style="position: absolute; left: 12px; top: 0; width: 196px; height: 34px; background: #000; border-radius: 0 0 14px 14px"></div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <span style="font-size: 15px; font-weight: 600">Тихо</span>
+        <span style="font-size: 13px; color: #a8a8ae; line-height: 1.45">Чаты работают или всё просмотрено. Чёлка выглядит как обычно.</span>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <div style="position: relative; height: 200px; background: #1c1c1f; border: 1px solid #26262a; border-radius: 14px; overflow: hidden">
+        <div style="height: 34px; background: #141416"></div>
+        <div style="position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 220px; height: 34px">
+          <div class="ear-l" style="left: 0"></div><div class="ear-r" style="right: 0"></div>
+          <div class="glow" style="position: absolute; left: 12px; top: 0; width: 196px; height: 34px; background: #000; border-radius: 0 0 14px 14px; box-sizing: border-box; padding: 0 12px; display: flex; align-items: center; justify-content: flex-end; {{doneVar}}">
+            <span style="display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: {{done}}"><span style="width: 6px; height: 6px; border-radius: 3px; background: {{done}}"></span>2</span>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <span style="font-size: 15px; font-weight: 600">Чат завершил задачу</span>
+        <span style="font-size: 13px; color: #a8a8ae; line-height: 1.45">Мягкое свечение по контуру и счётчик непросмотренных справа от камеры.</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px">
+        <span style="font-size: 12px; color: #9a9aa1">Цвет</span>
+        <sc-for list="{{doneSw}}" as="w" hint-placeholder-count="5">
+          <button class="sw" onClick="{{w.pick}}" aria-label="{{w.hex}}" aria-pressed="{{w.on}}" style="width: 22px; height: 22px; border-radius: 11px; border: 0; padding: 0; cursor: pointer; background: {{w.hex}}; box-shadow: {{w.ring}}"></button>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <div style="position: relative; height: 200px; background: #1c1c1f; border: 1px solid #26262a; border-radius: 14px; overflow: hidden">
+        <div style="height: 34px; background: #141416"></div>
+        <div style="position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 220px; height: 34px">
+          <div class="ear-l" style="left: 0"></div><div class="ear-r" style="right: 0"></div>
+          <div style="position: absolute; left: 12px; top: 0; width: 196px; height: 34px; background: #000; border-radius: 0 0 14px 14px; box-shadow: {{waitShadow}}; box-sizing: border-box; padding: 0 12px; display: flex; align-items: center; justify-content: flex-end">
+            <span class="blink" style="display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: {{wait}}"><span style="width: 6px; height: 6px; border-radius: 3px; background: {{wait}}"></span>1</span>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <span style="font-size: 15px; font-weight: 600">Ждёт твоего ответа · опционально</span>
+        <span style="font-size: 13px; color: #a8a8ae; line-height: 1.45">Чат упёрся в запрос разрешения. Статичный контур и мигающий счётчик, чтобы не путать с «готово».</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px">
+        <span style="font-size: 12px; color: #9a9aa1">Цвет</span>
+        <sc-for list="{{waitSw}}" as="w" hint-placeholder-count="5">
+          <button class="sw" onClick="{{w.pick}}" aria-label="{{w.hex}}" aria-pressed="{{w.on}}" style="width: 22px; height: 22px; border-radius: 11px; border: 0; padding: 0; cursor: pointer; background: {{w.hex}}; box-shadow: {{w.ring}}"></button>
+        </sc-for>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"doneColor":{"editor":"color","default":"#FF8A3D","options":["#FF8A3D","#34C759","#FFD60A","#FF5E7E","#BF5AF2"]},"waitColor":{"editor":"color","default":"#5AA2FF","options":["#5AA2FF","#64D2FF","#BF5AF2","#FFD60A","#FF5E7E"]},"$preview":{"width":1280,"height":520}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { done: null, wait: null };
+  }
+  renderVals() {
+    var self = this;
+    var done = this.state.done || this.props.doneColor || '#FF8A3D';
+    var wait = this.state.wait || this.props.waitColor || '#5AA2FF';
+    function rgb(h) { var n = parseInt(h.slice(1), 16); return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255); }
+    function sw(list, cur, key) {
+      return list.map(function (h) {
+        var on = h.toLowerCase() === cur.toLowerCase();
+        return { hex: h, on: on ? 'true' : 'false',
+          ring: on ? '0 0 0 2px #0f0f11, 0 0 0 4px ' + h : 'none',
+          pick: function () { var p = {}; p[key] = h; self.setState(p); } };
+      });
+    }
+    return {
+      done: done,
+      wait: wait,
+      doneVar: '--g:' + rgb(done),
+      waitShadow: '0 0 0 1.5px rgba(' + rgb(wait) + ',.85), 0 6px 20px 2px rgba(' + rgb(wait) + ',.35)',
+      doneSw: sw(['#FF8A3D', '#34C759', '#FFD60A', '#FF5E7E', '#BF5AF2'], done, 'done'),
+      waitSw: sw(['#5AA2FF', '#64D2FF', '#BF5AF2', '#FFD60A', '#FF5E7E'], wait, 'wait')
+    };
+  }
+}
+</script>
+</body>
+</html>

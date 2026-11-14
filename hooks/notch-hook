@@ -1,0 +1,62 @@
+#!/bin/bash
+# notch-hook — пересылает события хуков Claude Code в приложение Bangs.
+#
+# Claude Code передаёт JSON события в stdin. Скрипт заворачивает его в конверт
+#   {"tty": "...", "config_dir": "...", "project_dir": "...", "claude_pid": N, "ts": N, "event": {...}}
+# и отправляет POST на http://127.0.0.1:$BANGS_PORT/event. Если приложение не запущено —
+# кладёт конверт файлом в ~/Library/Application Support/Bangs/inbox/.
+# Никогда не тормозит и не ломает Claude Code: короткий таймаут, ошибки молча игнорируются, выход всегда 0.
+
+port="${BANGS_PORT:-47821}"
+inbox="$HOME/Library/Application Support/Bangs/inbox"
+
+payload=$(cat)
+[ -z "$payload" ] && exit 0
+
+# Укорачиваем тяжёлые поля (tool_response, большие tool_input) — jq есть в macOS 15+.
+if command -v jq >/dev/null 2>&1; then
+    slim=$(printf '%s' "$payload" | jq -c '
+        if (.hook_event_name // "" | startswith("PostToolUse"))
+        then {session_id, hook_event_name, cwd, transcript_path, tool_name}
+        else (if (.tool_input | type) == "object"
+              then .tool_input |= with_entries(if (.value | type) == "string" then .value |= .[0:4000] else . end)
+              else . end)
+        end' 2>/dev/null) && [ -n "$slim" ] && payload=$slim
+fi
+
+# Вкладка терминала (tty) и PID процесса claude: идём вверх по родителям.
+tty=""
+claude_pid=""
+pid=$PPID
+for _ in 1 2 3 4 5 6 7 8; do
+    case "$pid" in ''|0|1) break ;; esac
+    info=$(ps -o tty=,ppid=,comm= -p "$pid" 2>/dev/null) || break
+    read -r t ppid comm <<<"$info"
+    name=${comm##*/}
+    case "$name" in
+        sh|bash|zsh|dash|fish|env|-sh|-bash|-zsh|-fish) ;;
+        *) [ -z "$claude_pid" ] && claude_pid=$pid ;;
+    esac
+    if [ -z "$tty" ] && [ -n "$t" ] && [ "$t" != "??" ]; then tty="/dev/$t"; fi
+    [ -n "$tty" ] && [ -n "$claude_pid" ] && break
+    pid=$ppid
+done
+
+esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+ts=$(date +%s)
+body=$(printf '{"tty":"%s","config_dir":"%s","project_dir":"%s","claude_pid":%s,"ts":%s,"event":%s}' \
+    "$(esc "$tty")" "$(esc "$config_dir")" "$(esc "${CLAUDE_PROJECT_DIR:-}")" "${claude_pid:-null}" "$ts" "$payload")
+
+code=$(printf '%s' "$body" | curl -s -m 1 --connect-timeout 0.3 -o /dev/null -w '%{http_code}' \
+    -H 'Content-Type: application/json' --data-binary @- "http://127.0.0.1:$port/event" 2>/dev/null)
+
+if [ "$code" != "204" ] && [ "$code" != "200" ]; then
+    mkdir -p "$inbox" 2>/dev/null || exit 0
+    # Не копим бесконечно, если приложение давно не запускалось.
+    [ "$(ls "$inbox" 2>/dev/null | wc -l)" -gt 500 ] && exit 0
+    file="$inbox/$ts-$$-$RANDOM.json"
+    printf '%s' "$body" >"$file.tmp" 2>/dev/null && mv "$file.tmp" "$file" 2>/dev/null
+fi
+exit 0

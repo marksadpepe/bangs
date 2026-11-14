@@ -1,0 +1,7 @@
+.DS_Store
+.build/
+build/
+previews/
+*.xcodeproj
+.swiftpm/
+notch-app-handoff.zip
