@@ -9,6 +9,8 @@ extension AppModel {
     ]
     /// Через сколько удалять завершённые сессии.
     static let endedChatLifetime: TimeInterval = 10 * 60
+    /// Больше чатов не храним — защита от флуда событиями.
+    static let maxChats = 100
 
     func apply(_ e: HookEvent) {
         let existing = chats.firstIndex { $0.id == e.sessionId }
@@ -69,7 +71,7 @@ extension AppModel {
             if !c.status.isWaiting || c.request == nil {
                 c.request = PendingRequest(
                     kind: type == "permission_prompt" ? .permission : .question,
-                    context: lastMessage(c.transcriptPath) ?? e.string("message"))
+                    context: lastMessage(c.transcriptPath) ?? e.string("message").map { Transcript.excerpt($0) })
                 c.setStatus(.waiting, at: e.date)
             }
 
@@ -96,7 +98,29 @@ extension AppModel {
             break
         }
 
-        if let i = existing { chats[i] = c } else { chats.append(c) }
+        if let i = existing {
+            chats[i] = c
+        } else {
+            chats.append(c)
+            pruneToLimit(keeping: c.id)
+        }
+    }
+
+    /// Сверх лимита убираем самые старые: сначала завершённые, потом просмотренные, потом остальные.
+    private func pruneToLimit(keeping id: String) {
+        guard chats.count > Self.maxChats else { return }
+        func priority(_ c: Chat) -> Int { c.endedAt != nil ? 0 : c.status == .seen ? 1 : 2 }
+        let victims = chats
+            .filter { $0.id != id }
+            .sorted { (priority($0), $0.statusSince) < (priority($1), $1.statusSince) }
+            .prefix(chats.count - Self.maxChats)
+            .map(\.id)
+        chats.removeAll { victims.contains($0.id) }
+    }
+
+    private func clip(_ s: String?, _ limit: Int) -> String? {
+        guard let s else { return nil }
+        return s.count > limit ? String(s.prefix(limit - 1)) + "…" : s
     }
 
     /// Раз в полминуты: сессии без живого процесса claude считаем завершёнными, старые завершённые удаляем.
@@ -146,8 +170,8 @@ extension AppModel {
             command = tool
         }
         let suggestions = e.payload["permission_suggestions"] as? [Any] ?? []
-        return PendingRequest(kind: .permission, context: lastMessage(transcript), command: command,
-                              toolName: tool, allowAlways: !suggestions.isEmpty)
+        return PendingRequest(kind: .permission, context: lastMessage(transcript), command: clip(command, 2000),
+                              toolName: clip(tool, 100), allowAlways: !suggestions.isEmpty)
     }
 
     private func questionRequest(_ e: HookEvent, transcript: String?) -> PendingRequest {
@@ -159,7 +183,8 @@ extension AppModel {
             return label
         }
         return PendingRequest(kind: .question, context: lastMessage(transcript),
-                              question: first["question"] as? String, options: options,
-                              toolName: e.toolName)
+                              question: clip(first["question"] as? String, 1000),
+                              options: options.prefix(10).compactMap { clip($0, 300) },
+                              toolName: clip(e.toolName, 100))
     }
 }

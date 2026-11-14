@@ -45,7 +45,8 @@ more click takes you to the right Terminal tab.
   - Sessions whose `claude` process disappeared are cleaned up automatically.
 - **Settings**: dark or light theme, Russian or English, "done" and "waiting" colors, click-to-jump, launch at login.
 - **Multiple accounts**: shows the account name from `.claude.json` and supports separate `CLAUDE_CONFIG_DIR`s.
-- **Lightweight and local**: no Dock icon, no third-party dependencies, and no network beyond `127.0.0.1`.
+- **Lightweight and local**: no Dock icon, no third-party dependencies, and no network beyond `127.0.0.1`. Events
+  are authenticated with a local secret (see [Security](#security)).
 - Respects **Reduce Motion**.
 
 <p align="center">
@@ -95,6 +96,36 @@ Claude Code ──hook──▶ ~/.local/bin/notch-hook ──POST 127.0.0.1:478
    - Claude's last message is read from the session transcript.
    - State is saved to `~/Library/Application Support/Bangs/state.json`.
 6. The jump to Terminal uses AppleScript. macOS asks once for permission to control Terminal.
+
+## Security
+
+Bangs treats everything that arrives in an event as untrusted input.
+
+- **Not reachable from the network.** The event server binds to `127.0.0.1` only.
+- **Authenticated events.**
+  - The app keeps a random secret in `~/Library/Application Support/Bangs/token`. The file has mode `600` and the
+    folder has mode `700`.
+  - `notch-hook` sends the secret in an `X-Bangs-Token` header, passed through a file descriptor rather than on the
+    command line, so it never shows up in `ps`.
+  - Requests without the secret get `401`. That includes requests a web page tries to send to localhost and
+    requests from other users on the Mac.
+- **Strict HTTP parsing.** Malformed requests get `400`, and the app keeps running. That covers a negative or
+  non-numeric `Content-Length`, a duplicate `Content-Length`, chunked bodies, and oversized headers or bodies.
+- **Validated fields.**
+  - Session ids may only contain `[A-Za-z0-9._-]`, and ttys must look like `/dev/ttysNNN`.
+  - Paths must be absolute, with no `..` and no control characters.
+  - Anything else is dropped.
+- **Safe file reads.**
+  - Only regular files are read, never pipes or devices, which could hang the app.
+  - A transcript is read only if it is a `.jsonl` file inside a `projects/` folder.
+- **Terminal jump.**
+  - The tty and paths are quoted for both the shell and AppleScript.
+  - `claude --resume` runs only when the project folder and config dir really exist.
+- **Limits.** At most 100 chats are kept, and long commands, questions and options are clipped.
+- **The hook never executes event data.** It only wraps the data and forwards it. It always exits 0.
+
+A process running as *your* user can still read the token. Such a process can already do anything you can, so Bangs
+does not try to defend against it.
 
 ## Requirements
 

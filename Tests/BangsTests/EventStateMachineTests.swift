@@ -241,6 +241,62 @@ struct EventStateMachineTests {
         }
     }
 
+    // MARK: - Лимиты
+
+    /// Регрессия: флуд событиями раздувал список чатов без ограничений.
+    @Test func chatCountIsCapped() {
+        let m = makeModel()
+        for i in 0..<150 {
+            m.apply(hookEvent("UserPromptSubmit", session: "s\(i)", ["prompt": "Task \(i)"]))
+        }
+        #expect(m.chats.count == AppModel.maxChats)
+        #expect(m.chat("s149") != nil, "новый чат не вытесняется")
+    }
+
+    @Test func endedAndSeenChatsAreEvictedFirst() {
+        let m = makeModel()
+        var ended = makeChat("ended", .seen, since: Date())
+        ended.endedAt = Date()
+        let seen = makeChat("seen", .seen, since: Date().addingTimeInterval(-10))
+        let waiting = makeChat("waiting", .waiting, since: Date().addingTimeInterval(-9999))
+        m.chats = [waiting, seen, ended] + (0..<(AppModel.maxChats - 3)).map { makeChat("w\($0)", .working) }
+        m.apply(hookEvent("UserPromptSubmit", session: "new1", ["prompt": "x"]))
+        m.apply(hookEvent("UserPromptSubmit", session: "new2", ["prompt": "x"]))
+        #expect(m.chat("ended") == nil)
+        #expect(m.chat("seen") == nil)
+        #expect(m.chat("waiting") != nil, "ожидающий ответа чат не выбрасываем раньше просмотренных")
+    }
+
+    @Test func longStringsAreClipped() throws {
+        let m = makeModel()
+        m.apply(hookEvent("PermissionRequest", [
+            "tool_name": String(repeating: "T", count: 500),
+            "tool_input": ["command": String(repeating: "c", count: 10_000)],
+        ]))
+        let r = try #require(m.chat("s1")?.request)
+        #expect(r.command?.count == 2000)
+        #expect(r.toolName?.count == 100)
+
+        m.apply(hookEvent("PreToolUse", session: "q", ["tool_name": "AskUserQuestion", "tool_input": ["questions": [[
+            "question": String(repeating: "q", count: 5000),
+            "options": (0..<50).map { ["label": String(repeating: "o", count: 1000), "description": "\($0)"] },
+        ]]]]))
+        let q = try #require(m.chat("q")?.request)
+        #expect(q.question?.count == 1000)
+        #expect(q.options.count == 10)
+        #expect(q.options.allSatisfy { $0.count <= 300 })
+    }
+
+    @Test func unsafeTranscriptPathIsNotRead() throws {
+        try withTempDir { dir in
+            let secret = dir.appendingPathComponent("secret.jsonl")
+            try Data(#"{"type":"user","message":{"content":"TOP SECRET"}}"#.utf8).write(to: secret)
+            let m = makeModel()
+            m.apply(hookEvent("SessionStart", ["source": "resume", "transcript_path": secret.path]))
+            #expect(m.chat("s1")?.title == "", "чужой файл не стал названием чата")
+        }
+    }
+
     // MARK: - Уборка
 
     @Test func housekeepingEndsChatsWithDeadProcess() throws {

@@ -12,10 +12,22 @@ struct HookScriptTests {
             .merging(extra) { _, new in new }
     }
 
+    /// Токен в том месте, где его ищет notch-hook.
+    private func writeToken(_ token: String, home: URL) throws {
+        _ = try AuthToken.loadOrCreate(at: home.appendingPathComponent("Library/Application Support/Bangs/token"))
+        try Data(token.utf8).write(to: home.appendingPathComponent("Library/Application Support/Bangs/token"))
+    }
+
+    private func inboxFiles(_ home: URL) -> [String] {
+        let inbox = home.appendingPathComponent("Library/Application Support/Bangs/inbox")
+        return (try? FileManager.default.contentsOfDirectory(atPath: inbox.path)) ?? []
+    }
+
     @Test func deliversEnvelopeToServerAndSlimsToolResponse() async throws {
         try await withTempDir { home in
+            try writeToken(testToken, home: home)
             let collector = Collector()
-            let server = EventServer { collector.append($0) }
+            let server = EventServer(token: testToken) { collector.append($0) }
             let port = randomPort()
             try server.start(port: port)
             defer { server.stop() }
@@ -39,7 +51,39 @@ struct HookScriptTests {
             #expect(e.payload["tool_response"] == nil, "тяжёлый tool_response вырезается")
             #expect(e.claudePid != nil)
             #expect(abs(e.date.timeIntervalSinceNow) < 10)
+            #expect(inboxFiles(home).isEmpty, "доставлено напрямую, не через inbox")
         }
+    }
+
+    /// Без правильного токена сервер отвечает 401 — событие не теряется, а уходит в inbox (доступный только владельцу).
+    @Test func wrongTokenFallsBackToPrivateInbox() async throws {
+        try await withTempDir { home in
+            try writeToken(String(repeating: "cd", count: 32), home: home)
+            let collector = Collector()
+            let server = EventServer(token: testToken) { collector.append($0) }
+            let port = randomPort()
+            try server.start(port: port)
+            defer { server.stop() }
+            try await Task.sleep(for: .milliseconds(150))
+
+            let result = try runProcess("/bin/bash", [hook], environment: env(home: home, port: port),
+                                        stdin: Data(#"{"session_id":"s1","hook_event_name":"Stop"}"#.utf8))
+            #expect(result.status == 0)
+            try await Task.sleep(for: .milliseconds(200))
+            #expect(collector.all.isEmpty)
+            #expect(inboxFiles(home).count == 1)
+
+            let inbox = home.appendingPathComponent("Library/Application Support/Bangs/inbox")
+            let perms = try FileManager.default.attributesOfItem(atPath: inbox.path)[.posixPermissions] as? Int
+            #expect(perms == 0o700)
+        }
+    }
+
+    /// Токен не должен попадать в аргументы процессов (их видят все пользователи через `ps`).
+    @Test func tokenIsNotPassedAsArgument() throws {
+        let script = try String(contentsOfFile: hook, encoding: .utf8)
+        #expect(script.contains(#"-H @<(printf 'X-Bangs-Token: %s\n' "$token")"#))
+        #expect(!script.contains(#"-H "X-Bangs-Token: $token""#))
     }
 
     @Test func fallsBackToInboxWhenAppIsNotRunning() throws {

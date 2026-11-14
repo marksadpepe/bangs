@@ -101,3 +101,15 @@ func randomPort() -> UInt16 { UInt16.random(in: 49_200...60_000) }
 
 /// PATH для скриптов: системные утилиты (в macOS 15+ там есть jq) и Homebrew — на CI-раннерах jq может быть оттуда.
 let testPath = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
+
+/// Токен тестового сервера.
+let testToken = String(repeating: "ab", count: 32)
+
+/// Сырой HTTP-запрос через nc (URLSession не даёт отправить кривые заголовки). Возвращает ответ сервера.
+func rawRequest(port: UInt16, _ raw: String) throws -> String {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("raw-\(UUID().uuidString)")
+    try Data(raw.utf8).write(to: file)
+    defer { try? FileManager.default.removeItem(at: file) }
+    return try runProcess("/bin/sh", ["-c", "/usr/bin/nc -w 2 127.0.0.1 \(port) < '\(file.path)'"],
+                          environment: ["PATH": testPath]).output
+}

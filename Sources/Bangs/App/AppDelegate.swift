@@ -45,10 +45,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        let server = EventServer(onEvent: deliver)
+        let token: String
+        do {
+            token = try AuthToken.loadOrCreate()
+        } catch {
+            // Без токена сервер не запускаем: события будут приходить через папку inbox.
+            NSLog("Bangs: не удалось создать токен: \(error). Работаем через папку inbox.")
+            token = ""
+        }
+        let server = EventServer(token: token, onEvent: deliver)
         let port = ProcessInfo.processInfo.environment["BANGS_PORT"].flatMap(UInt16.init) ?? EventServer.defaultPort
         do {
-            try server.start(port: port)
+            if !token.isEmpty { try server.start(port: port) }
         } catch {
             NSLog("Bangs: не удалось открыть порт \(port): \(error). Работаем через папку inbox.")
         }

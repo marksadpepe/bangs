@@ -4,21 +4,98 @@ import Testing
 
 @Suite("HTTP-сервер событий", .serialized)
 struct EventServerTests {
-    private func request(_ port: UInt16, _ method: String, _ path: String, body: Data? = nil) async throws -> (Int, String) {
+    private func request(_ port: UInt16, _ method: String, _ path: String, body: Data? = nil,
+                         token: String? = testToken, headers: [String: String] = [:]) async throws -> (Int, String) {
         var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!)
         req.httpMethod = method
         req.httpBody = body
+        if let token { req.setValue(token, forHTTPHeaderField: "X-Bangs-Token") }
+        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
         req.timeoutInterval = 3
         let (data, response) = try await URLSession.shared.data(for: req)
         return ((response as? HTTPURLResponse)?.statusCode ?? 0, String(decoding: data, as: UTF8.self))
     }
 
     private func startServer(_ collector: Collector) async throws -> (EventServer, UInt16) {
-        let server = EventServer { collector.append($0) }
+        let server = EventServer(token: testToken) { collector.append($0) }
         let port = randomPort()
         try server.start(port: port)
         try await Task.sleep(for: .milliseconds(150))
         return (server, port)
+    }
+
+    private let validEvent = Data(#"{"event":{"session_id":"x","hook_event_name":"Stop"}}"#.utf8)
+
+    // MARK: - Защита
+
+    /// Регрессия: события принимались от кого угодно, в т.ч. «как с веб-страницы».
+    @Test func rejectsEventsWithoutValidToken() async throws {
+        let collector = Collector()
+        let (server, port) = try await startServer(collector)
+        defer { server.stop() }
+
+        let (none, _) = try await request(port, "POST", "/event", body: validEvent, token: nil)
+        #expect(none == 401)
+        let (wrong, _) = try await request(port, "POST", "/event", body: validEvent,
+                                           token: String(repeating: "cd", count: 32))
+        #expect(wrong == 401)
+        let (browserLike, _) = try await request(port, "POST", "/event", body: validEvent, token: nil,
+                                                 headers: ["Origin": "https://evil.example", "Content-Type": "text/plain"])
+        #expect(browserLike == 401)
+        let (empty, _) = try await request(port, "POST", "/event", body: validEvent, token: "")
+        #expect(empty == 401)
+
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(collector.all.isEmpty, "ни одно событие без токена не дошло")
+
+        let (ok, _) = try await request(port, "POST", "/event", body: validEvent)
+        #expect(ok == 204)
+        #expect(try await collector.wait().count == 1)
+    }
+
+    /// Регрессия: `Content-Length: -5` ронял приложение (Range requires lowerBound <= upperBound).
+    @Test(arguments: ["-5", "abc", "+5", "5 5", "99999999999", "\(EventServer.maxBodySize + 1)"])
+    func malformedContentLengthIsRejectedWithoutCrash(_ length: String) async throws {
+        let collector = Collector()
+        let (server, port) = try await startServer(collector)
+        defer { server.stop() }
+
+        let response = try rawRequest(port: port,
+            "POST /event HTTP/1.1\r\nHost: x\r\nX-Bangs-Token: \(testToken)\r\nContent-Length: \(length)\r\n\r\nabc")
+        #expect(response.hasPrefix("HTTP/1.1 400"), "\(response)")
+        // Сервер жив и продолжает принимать события.
+        let (ok, _) = try await request(port, "POST", "/event", body: validEvent)
+        #expect(ok == 204)
+    }
+
+    @Test(arguments: [
+        "garbage\r\n\r\n",
+        "POST /event\r\n\r\n",
+        "POST /event HTTP/1.1\r\nno-colon-header\r\n\r\n",
+        "POST /event HTTP/1.1\r\nContent-Length: 3\r\nContent-Length: 1\r\n\r\nabc",
+        "POST /event HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n",
+    ])
+    func malformedRequestsAreRejected(_ raw: String) async throws {
+        let collector = Collector()
+        let (server, port) = try await startServer(collector)
+        defer { server.stop() }
+        #expect(try rawRequest(port: port, raw).hasPrefix("HTTP/1.1 400"))
+        #expect(collector.all.isEmpty)
+    }
+
+    @Test func oversizedHeaderIsRejected() async throws {
+        let collector = Collector()
+        let (server, port) = try await startServer(collector)
+        defer { server.stop() }
+        let raw = "GET /health HTTP/1.1\r\nX-Junk: " + String(repeating: "a", count: 20_000) + "\r\n\r\n"
+        #expect(try rawRequest(port: port, raw).hasPrefix("HTTP/1.1 400"))
+    }
+
+    @Test func tokenComparison() {
+        #expect(EventServer.constantTimeEquals(testToken, testToken))
+        #expect(!EventServer.constantTimeEquals(testToken, String(testToken.dropLast())))
+        #expect(!EventServer.constantTimeEquals("", ""))
+        #expect(!EventServer.constantTimeEquals(testToken, String(testToken.dropLast()) + "c"))
     }
 
     @Test func acceptsPostedEvent() async throws {
@@ -202,7 +279,7 @@ struct StateStoreTests {
 struct EventServerBindingTests {
     /// Регрессия: сервер слушал *:port (все интерфейсы). Должен слушать только 127.0.0.1.
     @Test func listensOnLoopbackOnly() async throws {
-        let server = EventServer { _ in }
+        let server = EventServer(token: testToken) { _ in }
         let port = randomPort()
         try server.start(port: port)
         defer { server.stop() }
@@ -212,5 +289,140 @@ struct EventServerBindingTests {
                                     environment: ["PATH": testPath])
         #expect(result.output.contains("127.0.0.1:\(port)"), "\(result.output)")
         #expect(!result.output.contains("*:\(port)"), "\(result.output)")
+    }
+}
+
+@Suite("Токен")
+struct AuthTokenTests {
+    @Test func createsPrivateStableToken() throws {
+        try withTempDir { dir in
+            let url = dir.appendingPathComponent("support/token")
+            let first = try AuthToken.loadOrCreate(at: url)
+            #expect(AuthToken.isValid(first))
+            #expect(try AuthToken.loadOrCreate(at: url) == first, "токен постоянный между запусками")
+
+            let fm = FileManager.default
+            let filePerms = try fm.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
+            let dirPerms = try fm.attributesOfItem(atPath: url.deletingLastPathComponent().path)[.posixPermissions] as? Int
+            #expect(filePerms == 0o600)
+            #expect(dirPerms == 0o700)
+        }
+    }
+
+    @Test func replacesBrokenToken() throws {
+        try withTempDir { dir in
+            let url = dir.appendingPathComponent("token")
+            try Data("short".utf8).write(to: url)
+            let token = try AuthToken.loadOrCreate(at: url)
+            #expect(AuthToken.isValid(token))
+            #expect(try String(contentsOf: url, encoding: .utf8) == token)
+        }
+    }
+
+    @Test func tokensAreRandom() throws {
+        try withTempDir { dir in
+            let a = try AuthToken.loadOrCreate(at: dir.appendingPathComponent("a"))
+            let b = try AuthToken.loadOrCreate(at: dir.appendingPathComponent("b"))
+            #expect(a != b)
+        }
+    }
+}
+
+@Suite("Безопасные пути и файлы")
+struct SafeFileTests {
+    /// Регрессия: путь к именованному каналу (FIFO) в событии навсегда вешал чтение на главном потоке.
+    @Test func fifoIsRejectedWithoutBlocking() throws {
+        try withTempDir { dir in
+            let projects = dir.appendingPathComponent("projects/p")
+            try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+            let fifo = projects.appendingPathComponent("t.jsonl").path
+            #expect(mkfifo(fifo, 0o600) == 0)
+
+            let start = Date()
+            #expect(Transcript.firstUserPrompt(path: fifo) == nil)
+            #expect(Transcript.lastAssistantText(path: fifo) == nil)
+            #expect(Date().timeIntervalSince(start) < 1)
+            #expect(!SafeFile.isRegularFile(fifo))
+
+            // Симлинк на FIFO тоже не проходит.
+            let link = projects.appendingPathComponent("link.jsonl").path
+            try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: fifo)
+            #expect(!SafeFile.isRegularFile(link))
+
+            // .claude.json-канал для аккаунта.
+            let cfg = dir.appendingPathComponent("cfg")
+            try FileManager.default.createDirectory(at: cfg, withIntermediateDirectories: true)
+            #expect(mkfifo(cfg.appendingPathComponent(".claude.json").path, 0o600) == 0)
+            #expect(AccountReader.read(configDir: cfg.path) == nil)
+            #expect(Date().timeIntervalSince(start) < 1)
+        }
+    }
+
+    /// Регрессия: из события можно было указать любой файл как транскрипт и показать его начало в панели.
+    @Test func onlyTranscriptsUnderProjectsAreRead() throws {
+        try withTempDir { dir in
+            let line = #"{"type":"user","message":{"role":"user","content":"secret line"}}"#
+            let outside = dir.appendingPathComponent("notes.jsonl")
+            let wrongExt = dir.appendingPathComponent("projects/p/notes.txt")
+            let good = dir.appendingPathComponent("projects/p/s.jsonl")
+            for url in [outside, wrongExt, good] {
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data(line.utf8).write(to: url)
+            }
+            #expect(Transcript.firstUserPrompt(path: outside.path) == nil)
+            #expect(Transcript.firstUserPrompt(path: wrongExt.path) == nil)
+            #expect(Transcript.firstUserPrompt(path: good.path) == "secret line")
+            #expect(Transcript.firstUserPrompt(path: dir.path + "/projects/p/../../notes.jsonl") == nil)
+            #expect(Transcript.firstUserPrompt(path: "relative/projects/s.jsonl") == nil)
+        }
+    }
+
+    @Test func validators() {
+        #expect(SafeFile.isValidTTY("/dev/ttys003"))
+        #expect(SafeFile.isValidTTY("/dev/tty1"))
+        #expect(!SafeFile.isValidTTY("/dev/ttys003\" & quit"))
+        #expect(!SafeFile.isValidTTY("/etc/passwd"))
+        #expect(SafeFile.isValidSessionId("8e886c40-465c-4e4c-a227-8b2536bb97b0"))
+        #expect(!SafeFile.isValidSessionId("-rf"))
+        #expect(!SafeFile.isValidSessionId("a b"))
+        #expect(!SafeFile.isValidSessionId("x'; rm -rf ~; '"))
+        #expect(!SafeFile.isValidSessionId(String(repeating: "a", count: 129)))
+        #expect(!SafeFile.isPlausiblePath("/tmp/a\nb"))
+        #expect(!SafeFile.isPlausiblePath("/" + String(repeating: "a", count: 2000)))
+    }
+}
+
+@Suite("Возобновление сессии в Terminal")
+struct ResumeCommandTests {
+    @Test func buildsQuotedCommandForRealDirectory() throws {
+        try withTempDir { dir in
+            let project = dir.appendingPathComponent("it's a project")
+            try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+            var chat = makeChat("8e886c40-465c-4e4c-a227-8b2536bb97b0", .done, cwd: project.path)
+            #expect(TerminalJumper.resumeCommand(for: chat)
+                    == "cd '\(dir.path)/it'\\''s a project' && claude --resume '8e886c40-465c-4e4c-a227-8b2536bb97b0'")
+
+            chat.configDir = dir.path
+            #expect(TerminalJumper.resumeCommand(for: chat)?.contains("CLAUDE_CONFIG_DIR='\(dir.path)' claude") == true)
+        }
+    }
+
+    /// Регрессия: «Открыть в терминале» запускало `claude --resume` с любыми данными из события.
+    @Test func refusesSuspiciousChats() throws {
+        try withTempDir { dir in
+            #expect(TerminalJumper.resumeCommand(for: makeChat("ok-id", .done, cwd: dir.path + "/missing")) == nil)
+            #expect(TerminalJumper.resumeCommand(for: makeChat("x'; touch /tmp/pwned; '", .done, cwd: dir.path)) == nil)
+            #expect(TerminalJumper.resumeCommand(for: makeChat("--dangerously-skip-permissions", .done, cwd: dir.path)) == nil)
+            var chat = makeChat("ok-id", .done, cwd: dir.path)
+            chat.configDir = dir.path + "/no-such-config"
+            #expect(TerminalJumper.resumeCommand(for: chat) == nil)
+        }
+    }
+
+    @Test func shellQuoteSurvivesHostileInput() throws {
+        let hostile = #"a'b"c$(touch /tmp/x)`id`\n;|&"#
+        let result = try runProcess("/bin/sh", ["-c", "printf '%s' \(TerminalJumper.shellQuote(hostile))"],
+                                    environment: ["PATH": testPath])
+        #expect(result.output == hostile)
     }
 }

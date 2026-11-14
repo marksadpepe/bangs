@@ -20,7 +20,8 @@ struct TranscriptTests {
     ]
 
     private func writeTranscript(in dir: URL) throws -> String {
-        let url = dir.appendingPathComponent("t.jsonl")
+        let url = dir.appendingPathComponent("projects/app/t.jsonl")
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let text = try Self.lines
             .map { String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self) }
             .joined(separator: "\n") + "\nnot json\n"

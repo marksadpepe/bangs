@@ -4,9 +4,17 @@ import Foundation
 enum Transcript {
     private static let chunk = 512 * 1024
 
+    /// Транскрипты Claude Code лежат в `<config_dir>/projects/<проект>/<session>.jsonl`.
+    /// Любой другой путь из события (чужой файл, канал, устройство) не читаем.
+    static func isAllowedPath(_ path: String) -> Bool {
+        path.hasSuffix(".jsonl")
+            && path.split(separator: "/").contains("projects")
+            && SafeFile.isRegularFile(path)
+    }
+
     /// Первое настоящее сообщение пользователя (без служебных вставок и результатов инструментов).
     static func firstUserPrompt(path: String) -> String? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        guard isAllowedPath(path), let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
         guard let data = try? handle.read(upToCount: chunk) else { return nil }
         for line in lines(data) {
@@ -17,7 +25,7 @@ enum Transcript {
 
     /// Текст последнего ответа Claude.
     static func lastAssistantText(path: String) -> String? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        guard isAllowedPath(path), let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return nil }
         try? handle.seek(toOffset: size > UInt64(chunk) ? size - UInt64(chunk) : 0)

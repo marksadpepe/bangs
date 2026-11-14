@@ -16,20 +16,20 @@ struct HookEvent {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         let envelope = object["event"] is [String: Any] ? object : [:]
         let event = (object["event"] as? [String: Any]) ?? object
-        guard let name = event["hook_event_name"] as? String,
-              let sessionId = event["session_id"] as? String, !sessionId.isEmpty else { return nil }
+        guard let name = event["hook_event_name"] as? String, name.count <= 64,
+              let sessionId = event["session_id"] as? String, SafeFile.isValidSessionId(sessionId) else { return nil }
 
-        func nonEmpty(_ key: String) -> String? {
-            guard let s = envelope[key] as? String, !s.isEmpty else { return nil }
+        func path(_ key: String) -> String? {
+            guard let s = envelope[key] as? String, SafeFile.isPlausiblePath(s) else { return nil }
             return s
         }
         self.name = name
         self.sessionId = sessionId
         self.payload = event
-        self.tty = nonEmpty("tty")
-        self.configDir = nonEmpty("config_dir")
-        self.projectDir = nonEmpty("project_dir")
-        self.claudePid = (envelope["claude_pid"] as? NSNumber).map { Int32(truncating: $0) }
+        self.tty = (envelope["tty"] as? String).flatMap { SafeFile.isValidTTY($0) ? $0 : nil }
+        self.configDir = path("config_dir")
+        self.projectDir = path("project_dir")
+        self.claudePid = (envelope["claude_pid"] as? NSNumber).map { Int32(truncating: $0) }.flatMap { $0 > 1 ? $0 : nil }
         if let ts = envelope["ts"] as? NSNumber, ts.doubleValue > 0 {
             self.date = Date(timeIntervalSince1970: ts.doubleValue)
         } else {
@@ -42,8 +42,8 @@ struct HookEvent {
         return s
     }
 
-    var cwd: String? { string("cwd") }
-    var transcriptPath: String? { string("transcript_path") }
+    var cwd: String? { string("cwd").flatMap { SafeFile.isPlausiblePath($0) ? $0 : nil } }
+    var transcriptPath: String? { string("transcript_path").flatMap { SafeFile.isPlausiblePath($0) ? $0 : nil } }
     var toolName: String? { string("tool_name") }
     var toolInput: [String: Any] { payload["tool_input"] as? [String: Any] ?? [:] }
 }

@@ -10,7 +10,7 @@ enum TerminalJumper {
 
     @discardableResult
     static func open(_ chat: Chat) -> Outcome {
-        if let tty = chat.tty, isTerminalRunning {
+        if let tty = chat.tty, SafeFile.isValidTTY(tty), isTerminalRunning {
             switch focusTab(tty: tty) {
             case true?: return .focused
             case false?: break
@@ -54,13 +54,25 @@ enum TerminalJumper {
         return run(script)?.booleanValue
     }
 
-    private static func resume(_ chat: Chat) -> Outcome {
+    /// Команда для возобновления сессии в новом окне Terminal или nil, если данные чата подозрительные:
+    /// id сессии — только [A-Za-z0-9._-], папка проекта и CLAUDE_CONFIG_DIR должны существовать.
+    nonisolated static func resumeCommand(for chat: Chat) -> String? {
+        guard SafeFile.isValidSessionId(chat.id), SafeFile.isDirectory(chat.cwd) else { return nil }
         var command = "cd \(shellQuote(chat.cwd)) && "
         let defaultConfig = NSHomeDirectory() + "/.claude"
         if let dir = chat.configDir, dir != defaultConfig {
+            guard SafeFile.isDirectory(dir) else { return nil }
             command += "CLAUDE_CONFIG_DIR=\(shellQuote(dir)) "
         }
-        command += "claude --resume \(shellQuote(chat.id))"
+        return command + "claude --resume \(shellQuote(chat.id))"
+    }
+
+    private static func resume(_ chat: Chat) -> Outcome {
+        guard let command = resumeCommand(for: chat) else {
+            NSLog("Bangs: отказ возобновить сессию — подозрительные данные чата")
+            activateTerminal()
+            return .failed
+        }
         let script = """
         tell application id "\(bundleId)"
             activate
@@ -99,7 +111,7 @@ enum TerminalJumper {
         s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     }
 
-    private static func shellQuote(_ s: String) -> String {
+    nonisolated static func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }

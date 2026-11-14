@@ -2,16 +2,27 @@ import Foundation
 import Network
 
 /// Минимальный HTTP-сервер на 127.0.0.1: принимает `POST /event` от notch-hook.
-/// `GET /health` → 200 — для проверки, что приложение слушает.
+///
+/// Защита:
+/// - сокет привязан только к 127.0.0.1 — из сети недоступен;
+/// - `POST /event` требует заголовок `X-Bangs-Token` с секретом из файла, доступного только владельцу
+///   (см. `AuthToken`) — веб-страницы и другие пользователи Mac не могут подделать события;
+/// - некорректные запросы (кривой `Content-Length`, мусор вместо заголовков, слишком большие) → 400.
+///
+/// `GET /health` → 200 без токена — для проверки, что приложение слушает.
 final class EventServer {
     static let defaultPort: UInt16 = 47821
-    private static let maxRequestSize = 4 << 20
+    static let tokenHeader = "x-bangs-token"
+    static let maxBodySize = 4 << 20
+    private static let maxHeaderSize = 16 * 1024
 
     private let queue = DispatchQueue(label: "dev.bangs.server")
+    private let token: String
     private let onEvent: (Data) -> Void
     private var listener: NWListener?
 
-    init(onEvent: @escaping (Data) -> Void) {
+    init(token: String, onEvent: @escaping (Data) -> Void) {
+        self.token = token
         self.onEvent = onEvent
     }
 
@@ -51,23 +62,34 @@ final class EventServer {
             var buffer = buffer
             if let data { buffer.append(data) }
 
-            if let request = HTTPRequest(buffer) {
-                switch (request.method, request.path) {
-                case ("POST", "/event"):
-                    self.respond(connection, status: "204 No Content")
-                    self.onEvent(request.body)
-                case ("GET", "/health"):
-                    self.respond(connection, status: "200 OK", body: "ok")
-                default:
-                    self.respond(connection, status: "404 Not Found")
+            switch HTTPRequest.parse(buffer) {
+            case .complete(let request):
+                self.route(request, on: connection)
+            case .invalid:
+                self.respond(connection, status: "400 Bad Request")
+            case .incomplete:
+                if isComplete || error != nil {
+                    connection.cancel()
+                } else {
+                    self.receive(connection, buffer: buffer)
                 }
+            }
+        }
+    }
+
+    private func route(_ request: HTTPRequest, on connection: NWConnection) {
+        switch (request.method, request.path) {
+        case ("POST", "/event"):
+            guard Self.constantTimeEquals(request.headers[Self.tokenHeader] ?? "", token) else {
+                respond(connection, status: "401 Unauthorized")
                 return
             }
-            if isComplete || error != nil || buffer.count > Self.maxRequestSize {
-                connection.cancel()
-                return
-            }
-            self.receive(connection, buffer: buffer)
+            respond(connection, status: "204 No Content")
+            onEvent(request.body)
+        case ("GET", "/health"):
+            respond(connection, status: "200 OK", body: "ok")
+        default:
+            respond(connection, status: "404 Not Found")
         }
     }
 
@@ -75,33 +97,66 @@ final class EventServer {
         let response = "HTTP/1.1 \(status)\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
         connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in connection.cancel() })
     }
+
+    /// Сравнение без раннего выхода — время не зависит от того, сколько символов совпало.
+    static func constantTimeEquals(_ a: String, _ b: String) -> Bool {
+        let x = Array(a.utf8), y = Array(b.utf8)
+        guard x.count == y.count, !y.isEmpty else { return false }
+        var diff: UInt8 = 0
+        for i in x.indices { diff |= x[i] ^ y[i] }
+        return diff == 0
+    }
 }
 
-/// Разбор HTTP/1.1-запроса; nil — запрос ещё не пришёл целиком.
-private struct HTTPRequest {
+/// Разбор HTTP/1.1-запроса.
+struct HTTPRequest {
     let method: String
     let path: String
+    /// Имена заголовков — в нижнем регистре.
+    let headers: [String: String]
     let body: Data
 
-    init?(_ data: Data) {
-        guard let headerEnd = data.firstRange(of: Data("\r\n\r\n".utf8)),
-              let head = String(data: data[data.startIndex..<headerEnd.lowerBound], encoding: .utf8) else { return nil }
-        let lines = head.components(separatedBy: "\r\n")
-        let requestLine = lines.first?.split(separator: " ") ?? []
-        guard requestLine.count >= 2 else { return nil }
+    enum ParseResult {
+        case incomplete
+        case invalid
+        case complete(HTTPRequest)
+    }
 
-        var length = 0
+    static func parse(_ data: Data, maxHeaderSize: Int = 16 * 1024, maxBodySize: Int = EventServer.maxBodySize) -> ParseResult {
+        guard let headerEnd = data.firstRange(of: Data("\r\n\r\n".utf8)) else {
+            return data.count > maxHeaderSize ? .invalid : .incomplete
+        }
+        guard headerEnd.lowerBound - data.startIndex <= maxHeaderSize,
+              let head = String(data: data[data.startIndex..<headerEnd.lowerBound], encoding: .utf8) else { return .invalid }
+
+        let lines = head.components(separatedBy: "\r\n")
+        let requestLine = lines.first?.split(separator: " ", omittingEmptySubsequences: true) ?? []
+        guard requestLine.count == 3, requestLine[2].hasPrefix("HTTP/1.") else { return .invalid }
+
+        var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             let parts = line.split(separator: ":", maxSplits: 1)
-            if parts.count == 2, parts[0].trimmingCharacters(in: .whitespaces).lowercased() == "content-length" {
-                length = Int(parts[1].trimmingCharacters(in: .whitespaces)) ?? 0
-            }
+            guard parts.count == 2 else { return .invalid }
+            let name = parts[0].trimmingCharacters(in: .whitespaces).lowercased()
+            let value = parts[1].trimmingCharacters(in: .whitespaces)
+            // Повторный Content-Length с другим значением — классический приём подмены тела.
+            if let existing = headers[name], name == "content-length", existing != value { return .invalid }
+            headers[name] = value
         }
-        let bodyStart = headerEnd.upperBound
-        guard data.count - (bodyStart - data.startIndex) >= length else { return nil }
+        if headers["transfer-encoding"] != nil { return .invalid }  // chunked не поддерживаем
 
-        method = String(requestLine[0])
-        path = String(requestLine[1])
-        body = data[bodyStart..<(bodyStart + length)]
+        var length = 0
+        if let raw = headers["content-length"] {
+            // Только цифры: отрицательные, «+5», пробелы внутри и переполнение — ошибка, а не падение.
+            guard !raw.isEmpty, raw.count <= 10, raw.allSatisfy(\.isASCII), raw.allSatisfy(\.isNumber),
+                  let value = Int(raw), value <= maxBodySize else { return .invalid }
+            length = value
+        }
+
+        let bodyStart = headerEnd.upperBound
+        let available = data.endIndex - bodyStart
+        guard available >= length else { return .incomplete }
+        return .complete(HTTPRequest(method: String(requestLine[0]), path: String(requestLine[1]),
+                                     headers: headers, body: Data(data[bodyStart..<(bodyStart + length)])))
     }
 }

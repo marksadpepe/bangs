@@ -16,6 +16,7 @@ final class InboxWatcher {
 
     func start() {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         drain()
         let fd = open(directory.path, O_EVTONLY)
         guard fd >= 0 else { return }

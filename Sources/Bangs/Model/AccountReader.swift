@@ -8,7 +8,8 @@ enum AccountReader {
     static func read(configDir: String?) -> Account? {
         let dir = configDir ?? defaultConfigDir
         let path = dir == defaultConfigDir ? NSHomeDirectory() + "/.claude.json" : dir + "/.claude.json"
-        guard let data = FileManager.default.contents(atPath: path),
+        guard SafeFile.isRegularFile(path, maxSize: 64 << 20),
+              let data = FileManager.default.contents(atPath: path),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let oauth = json["oauthAccount"] as? [String: Any] else { return nil }
 
