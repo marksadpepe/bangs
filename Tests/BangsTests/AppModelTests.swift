@@ -153,6 +153,21 @@ struct AppModelTests {
         #expect(m.chat("a")?.status == .denied)
     }
 
+    /// Регрессия: открыть и закрыть панель, ничего не нажимая, — статус «ждёт» не меняется.
+    @Test func openingAndClosingPanelKeepsWaiting() {
+        let m = makeModel()
+        m.chats = [makeChat("a", .waiting), makeChat("b", .done)]
+        for _ in 0..<2 {
+            m.prepareOpen()
+            m.didClose()
+        }
+        #expect(m.chat("a")?.status == .waiting)
+        #expect(m.chat("b")?.status == .done)
+        #expect(m.indicator == .done(1))
+        m.setStatus("b", .seen)
+        #expect(m.indicator == .waiting(1))
+    }
+
     @Test func closingPanelFromDetailMarksWaitSeen() {
         let m = makeModel()
         m.chats = [makeChat("a", .waiting)]

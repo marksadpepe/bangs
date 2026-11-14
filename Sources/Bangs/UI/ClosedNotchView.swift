@@ -19,6 +19,9 @@ struct ClosedNotchView: View {
             switch indicator {
             case .done:
                 DoneGlow(color: model.doneColor, width: bodyWidth, height: g.notchHeight, animated: animate)
+                    // Бесконечная анимация запускается в onAppear и замирает, пока чёлка скрыта под панелью.
+                    // Новый идентификатор после каждого закрытия панели перезапускает её с начала.
+                    .id(model.panelVisible)
             case .waiting:
                 NotchGlow(color: model.waitColor, width: bodyWidth, height: g.notchHeight,
                           ring: 0.85, glow: 0.35, blur: 20, y: 6, spread: 2)
@@ -38,6 +41,7 @@ struct ClosedNotchView: View {
                 switch indicator {
                 case .done(let n): NotchCounter(count: n, color: model.doneColor, blink: false)
                 case .waiting(let n): NotchCounter(count: n, color: model.waitColor, blink: animate)
+                    .id(model.panelVisible)
                 case .quiet: EmptyView()
                 }
             }
