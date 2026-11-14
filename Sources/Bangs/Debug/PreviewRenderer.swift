@@ -39,10 +39,14 @@ enum PreviewRenderer {
             ("panel-detail-question-light", AnyView(PanelScene(model: model(.light, .ru, .detail("c2"))))),
             ("panel-settings", AnyView(PanelScene(model: model(.dark, .ru, .settings)))),
             ("panel-empty", AnyView(PanelScene(model: model { $0.chats = [] }))),
+            ("panel-list-light-en", AnyView(PanelScene(model: model(.light, .en)))),
+            ("panel-detail-permission-en", AnyView(PanelScene(model: model(.dark, .en, .detail("b2"))))),
+            ("panel-detail-question-light-en", AnyView(PanelScene(model: model(.light, .en, .detail("c2"))))),
+            ("panel-settings-en", AnyView(PanelScene(model: model(.dark, .en, .settings)))),
         ]
 
         for (name, view) in shots {
-            let renderer = ImageRenderer(content: view)
+            let renderer = ImageRenderer(content: view.environment(\.staticRendering, true))
             renderer.scale = 2
             guard let cg = renderer.cgImage,
                   let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else {

@@ -123,6 +123,7 @@ struct StatusDot: View {
     let status: ChatStatus
     let model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.staticRendering) private var staticRendering
     @State private var pulse = false
 
     var body: some View {
@@ -144,7 +145,7 @@ struct StatusDot: View {
         }
         .frame(width: 7, height: 7)
         .onAppear {
-            guard status == .working, !reduceMotion else { return }
+            guard status == .working, !reduceMotion, !staticRendering else { return }
             withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulse = true }
         }
     }

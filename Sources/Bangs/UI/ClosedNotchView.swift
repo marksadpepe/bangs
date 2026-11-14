@@ -5,8 +5,10 @@ struct ClosedNotchView: View {
     let model: AppModel
     var onTap: () -> Void = {}
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.staticRendering) private var staticRendering
 
     var body: some View {
+        let animate = !reduceMotion && !staticRendering
         let g = model.geometry
         let indicator = model.indicator
         let active = indicator.isActive
@@ -16,7 +18,7 @@ struct ClosedNotchView: View {
         ZStack(alignment: .top) {
             switch indicator {
             case .done:
-                DoneGlow(color: model.doneColor, width: bodyWidth, height: g.notchHeight, animated: !reduceMotion)
+                DoneGlow(color: model.doneColor, width: bodyWidth, height: g.notchHeight, animated: animate)
             case .waiting:
                 NotchGlow(color: model.waitColor, width: bodyWidth, height: g.notchHeight,
                           ring: 0.85, glow: 0.35, blur: 20, y: 6, spread: 2)
@@ -35,7 +37,7 @@ struct ClosedNotchView: View {
             Group {
                 switch indicator {
                 case .done(let n): NotchCounter(count: n, color: model.doneColor, blink: false)
-                case .waiting(let n): NotchCounter(count: n, color: model.waitColor, blink: !reduceMotion)
+                case .waiting(let n): NotchCounter(count: n, color: model.waitColor, blink: animate)
                 case .quiet: EmptyView()
                 }
             }

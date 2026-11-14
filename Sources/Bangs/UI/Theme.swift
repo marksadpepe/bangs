@@ -97,3 +97,15 @@ struct SurfaceButtonStyle: ButtonStyle {
         }
     }
 }
+
+/// true — рисуем статичный кадр (рендер скриншотов): бесконечные анимации не запускаем.
+private struct StaticRenderingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var staticRendering: Bool {
+        get { self[StaticRenderingKey.self] }
+        set { self[StaticRenderingKey.self] = newValue }
+    }
+}
